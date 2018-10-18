@@ -1,6 +1,9 @@
 #![no_std]
 #![allow(patterns_in_fns_without_body)]
 
+use svisual::{NAME_SZ, PACKET_SZ, VL_SZ};
+pub mod prelude;
+
 use heapless::{
     consts::U1
 };
@@ -9,8 +12,6 @@ use stm32f103xx_hal as hal;
 use crate::hal::stm32f103xx as device;
 use crate::hal::{serial::Tx,dma::dma1};
 use crate::device::{USART1,USART2,USART3};
-
-use svisual::{NAME_SZ, PACKET_SZ, VL_SZ};
 
 fn copy_slice(dst: &mut [u8], src: &[u8]) {
     for (d, s) in dst.iter_mut().zip(src.iter()) {
