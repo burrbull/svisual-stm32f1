@@ -12,6 +12,7 @@ use crate::hal::serial::Serial;
 use cortex_m_rt::{entry};
 
 use svisual_stm32f1::prelude::*;
+use heapless::consts::{U2};
 
 #[entry]
 fn main() -> ! {
@@ -42,20 +43,21 @@ fn main() -> ! {
     let tx = serial.split().0;
     let c = channels.4;
     
-    let mut map = heapless::FnvIndexMap::new();
+    let mut sv = svisual::SV::<U2>::new();
     
     let mut tx = Some(tx);
     let mut c = Some(c);
     
     loop {
-        for i in 0..10 {
-            map.add_float_value(b"temp", 15.+(i as f32)).ok();
+        for i in 0..30 {
+            if sv.add_float_value(b"temp", 15.+(i as f32)).ok().unwrap() {
+                let c_back = c.take().unwrap();
+                let tx_back = tx.take().unwrap();
+                let (c_back, tx_back) = tx_back.send_package_dma(b"TempMod", c_back, &sv);
+                tx = Some(tx_back);
+                c = Some(c_back);
+            }
+            sv.next();
         }
-        let c_back = c.take().unwrap();
-        let tx_back = tx.take().unwrap();
-        let (c_back, tx_back) = tx_back.send_package_dma(b"TempMod", c_back, &map);
-        map.clear();
-        tx = Some(tx_back);
-        c = Some(c_back);
     }
 }

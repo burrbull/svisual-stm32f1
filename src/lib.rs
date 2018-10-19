@@ -44,9 +44,9 @@ impl SendPackageDma for Tx<$USARTX> {
 
         static mut NDATA : [u8; NAME_SZ+4] = [0u8; NAME_SZ+4];
         unsafe {
-            // Общий размер пакета
+            // Full package size
             LE::write_i32(&mut NDATA[0..4], (NAME_SZ + VL_SZ * values.map.len()) as i32);
-            // Идентификатор (название) модуля
+            // Identifier (name) of the module
             copy_slice(&mut NDATA[4..], module);
         }
         let (_, c, tx) = unsafe { tx.write_all(c, &NDATA).wait() };
