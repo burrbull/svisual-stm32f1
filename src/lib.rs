@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(patterns_in_fns_without_body)]
 
 use svisual::{SV, NAME_SZ, PACKET_SZ, VL_SZ};
 pub mod prelude;
@@ -19,32 +18,24 @@ fn copy_slice(dst: &mut [u8], src: &[u8]) {
 }
 
 
-pub trait SendPackageDma {
-    type Chan;
+pub trait SendPackageDma : DmaChannel {
     fn send_package_dma(
         self,
         module: &'static [u8],
-        mut c: Self::Chan,
+        c: Self::Dma,
         values: &SV<U2>)
-    -> (Self::Chan, Self);
+    -> (Self::Dma, Self);
 }
 
-
 macro_rules! impl_send_package_dma {
-    ($(
-        $USARTX:ident: (
-            tx: $tx_chan:path
-        ),
-    )+) => {
-        $(
+    ($USARTX:ident) => {
 impl SendPackageDma for Tx<$USARTX> {
-    type Chan = $tx_chan;
     fn send_package_dma(
         self,
         module: &'static [u8],
-        c: Self::Chan,
+        c: Self::Dma,
         values: &SV<U2>)
-    -> (Self::Chan, Self) {
+    -> (Self::Dma, Self) {
         //if values.map.is_empty() {
         //    return Err(Error::EmptyPackage);
         //}
@@ -86,7 +77,6 @@ impl SendPackageDma for Tx<$USARTX> {
         (c, tx)
     }
 }
-        )+
     }
 }
 
@@ -98,14 +88,22 @@ impl core::convert::AsRef<[u8]> for MyData {
     }
 }
 
-impl_send_package_dma! {
-    USART1: (
-        tx: dma1::C4
-    ),
-    USART2: (
-        tx: dma1::C7
-    ),
-    USART3: (
-        tx: dma1::C2
-    ),
+pub trait DmaChannel {
+    type Dma;
 }
+
+impl DmaChannel for Tx<USART1> {
+    type Dma = dma1::C4;
+}
+
+impl DmaChannel for Tx<USART2> {
+    type Dma = dma1::C7;
+}
+
+impl DmaChannel for Tx<USART3> {
+    type Dma = dma1::C2;
+}
+
+impl_send_package_dma!(USART1);
+impl_send_package_dma!(USART2);
+impl_send_package_dma!(USART3);
