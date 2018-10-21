@@ -3,7 +3,7 @@
 use svisual::{SV, NAME_SZ, PACKET_SZ, VL_SZ};
 pub mod prelude;
 
-use heapless::consts::U2;
+//use heapless::consts::U2;
 
 use byteorder::{LE,ByteOrder};
 use stm32f103xx_hal as hal;
@@ -21,23 +21,25 @@ fn copy_slice(dst: &mut [u8], src: &[u8]) {
 }
 
 
-pub trait SendPackageDma : DmaChannel {
+pub trait SendPackageDma<N> : DmaChannel
+    where N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec)> {
     fn send_package_dma(
         self,
         module: &'static [u8],
         c: Self::Dma,
-        values: &SV<U2>)
+        values: &SV<N>)
     -> (Self::Dma, Self);
 }
 
 macro_rules! impl_send_package_dma {
     ($USARTX:ident) => {
-impl SendPackageDma for Tx<$USARTX> {
+impl<N> SendPackageDma<N> for Tx<$USARTX>
+    where N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec)> {
     fn send_package_dma(
         self,
         module: &'static [u8],
         c: Self::Dma,
-        values: &SV<U2>)
+        values: &SV<N>)
     -> (Self::Dma, Self) {
         //if values.map.is_empty() {
         //    return Err(Error::EmptyPackage);

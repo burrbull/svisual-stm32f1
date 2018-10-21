@@ -13,7 +13,7 @@ use crate::hal::serial::Serial;
 use cortex_m_rt::{entry};
 
 use svisual_stm32f1::prelude::*;
-use heapless::consts::{U2};
+use heapless::consts::{U1};
 
 #[entry]
 fn main() -> ! {
@@ -46,7 +46,7 @@ fn main() -> ! {
     let tx = serial.split().0;
     let c = channels.4;
     
-    let mut sv = svisual::SV::<U2>::new();
+    let mut sv = svisual::SV::<U1>::new();
     
     let mut tx = Some(tx);
     let mut c = Some(c);
@@ -61,7 +61,7 @@ fn main() -> ! {
                 tx = Some(tx_back);
                 c = Some(c_back);
             });
-            delay.delay_ms(500u16);
+            delay.delay_ms(100u16);
         }
     }
 }
