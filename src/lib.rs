@@ -7,8 +7,11 @@ use heapless::consts::U2;
 
 use byteorder::{LE,ByteOrder};
 use stm32f103xx_hal as hal;
-use crate::hal::stm32f103xx as device;
-use crate::hal::{serial::Tx,dma::dma1};
+use crate::hal::{
+    stm32f103xx as device,
+    serial::{Tx, WriteDma},
+    dma::DmaChannel
+};
 use crate::device::{USART1,USART2,USART3};
 
 fn copy_slice(dst: &mut [u8], src: &[u8]) {
@@ -86,22 +89,6 @@ impl core::convert::AsRef<[u8]> for MyData {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
-}
-
-pub trait DmaChannel {
-    type Dma;
-}
-
-impl DmaChannel for Tx<USART1> {
-    type Dma = dma1::C4;
-}
-
-impl DmaChannel for Tx<USART2> {
-    type Dma = dma1::C7;
-}
-
-impl DmaChannel for Tx<USART3> {
-    type Dma = dma1::C2;
 }
 
 impl_send_package_dma!(USART1);
