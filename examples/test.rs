@@ -7,6 +7,7 @@ extern crate panic_halt;
 
 use stm32f103xx_hal as hal;
 use crate::hal::stm32f103xx as device;
+use crate::hal::delay::Delay;
 use crate::hal::prelude::*;
 use crate::hal::serial::Serial;
 use cortex_m_rt::{entry};
@@ -16,7 +17,7 @@ use heapless::consts::{U2};
 
 #[entry]
 fn main() -> ! {
-    let _cp = cortex_m::Peripherals::take().unwrap();
+    let cp = cortex_m::Peripherals::take().unwrap();
     let dp = device::Peripherals::take().unwrap();
 
     let mut flash = dp.FLASH.constrain();
@@ -28,6 +29,8 @@ fn main() -> ! {
     let channels = dp.DMA1.split(&mut rcc.ahb);
 
     let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
+    
+    let mut delay = Delay::new(cp.SYST, clocks);
     
     // USART1
     let pa9 = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
@@ -50,14 +53,15 @@ fn main() -> ! {
     
     loop {
         for i in 0..30 {
-            if sv.add_float_value(b"temp", 15.+(i as f32)).ok().unwrap() {
+            sv.add_float_value(b"temp", 15.+(i as f32)).ok();
+            sv.next(|s| {
                 let c_back = c.take().unwrap();
                 let tx_back = tx.take().unwrap();
-                let (c_back, tx_back) = tx_back.send_package_dma(b"TempMod", c_back, &sv);
+                let (c_back, tx_back) = tx_back.send_package_dma(b"TempMod", c_back, s);
                 tx = Some(tx_back);
                 c = Some(c_back);
-            }
-            sv.next();
+            });
+            delay.delay_ms(500u16);
         }
     }
 }
