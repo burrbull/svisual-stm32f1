@@ -1,2 +1,2 @@
-pub use svisual::{PACKET_SZ, AddValue};
-pub use crate::{SendPackageDma};
+pub use svisual::AddValue;
+pub use crate::SendPackageDma;

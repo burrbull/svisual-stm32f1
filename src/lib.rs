@@ -1,16 +1,17 @@
 #![no_std]
-#![allow(patterns_in_fns_without_body)]
 
-use svisual::{NAME_SZ, PACKET_SZ, VL_SZ};
+use svisual::{SV, NAME_SZ};
 pub mod prelude;
 
-use heapless::{
-    consts::U1
-};
+const PACKET_SZ: usize = 10;
+
 use byteorder::{LE,ByteOrder};
 use stm32f103xx_hal as hal;
-use crate::hal::stm32f103xx as device;
-use crate::hal::{serial::Tx,dma::dma1};
+use crate::hal::{
+    stm32f103xx as device,
+    serial::{Tx, WriteDma},
+    dma::DmaChannel
+};
 use crate::device::{USART1,USART2,USART3};
 
 fn copy_slice(dst: &mut [u8], src: &[u8]) {
@@ -20,52 +21,55 @@ fn copy_slice(dst: &mut [u8], src: &[u8]) {
 }
 
 
-pub trait SendPackageDma {
-    type Chan;
+pub trait SendPackageDma<N, P> : DmaChannel
+where
+    N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
+    P: generic_array::ArrayLength<i32>
+{
     fn send_package_dma(
         self,
         module: &'static [u8],
-        mut c: Self::Chan,
-        values: &heapless::FnvIndexMap<&[u8], svisual::ValueRec, U1>)
-    -> (Self::Chan, Self);
+        c: Self::Dma,
+        values: &SV<N, P>)
+    -> (Self::Dma, Self);
 }
 
-
 macro_rules! impl_send_package_dma {
-    ($(
-        $USARTX:ident: (
-            tx: $tx_chan:path
-        ),
-    )+) => {
-        $(
-impl SendPackageDma for Tx<$USARTX> {
-    type Chan = $tx_chan;
+    ($USARTX:ident) => {
+impl<N, P> SendPackageDma<N, P> for Tx<$USARTX>
+where
+    N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
+    P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned
+{
     fn send_package_dma(
         self,
         module: &'static [u8],
-        c: Self::Chan,
-        values: &heapless::FnvIndexMap<&[u8], svisual::ValueRec, U1>)
-    -> (Self::Chan, Self) {
-        //if values.is_empty() {
+        c: Self::Dma,
+        values: &SV<N, P>)
+    -> (Self::Dma, Self) {
+        //if values.map.is_empty() {
         //    return Err(Error::EmptyPackage);
         //}
 
         let (_, c, tx) = self.write_all(c, b"=begin=").wait();
-
+        
+        let packet_size = P::to_usize();
+        let vl_size : usize = NAME_SZ+4+packet_size*4;
         static mut NDATA : [u8; NAME_SZ+4] = [0u8; NAME_SZ+4];
         unsafe {
-            // Общий размер пакета
-            LE::write_i32(&mut NDATA[0..4], (NAME_SZ + VL_SZ * values.len()) as i32);
-            // Идентификатор (название) модуля
+            // Full package size
+            LE::write_i32(&mut NDATA[0..4], (NAME_SZ + vl_size * values.map.len()) as i32);
+            // Identifier (name) of the module
             copy_slice(&mut NDATA[4..], module);
         }
         let (_, c, tx) = unsafe { tx.write_all(c, &NDATA).wait() };
 
         let mut tx = Some(tx);
         let mut c = Some(c);
-        for (k, v) in values {
+        for (k, v) in values.map.iter() {
             let c_back = c.take().unwrap();
             let tx_back = tx.take().unwrap();
+            // Data for single variable
             unsafe {
                 NDATA = [0u8; NAME_SZ+4];
                 copy_slice(&mut NDATA[0..NAME_SZ], k);
@@ -73,10 +77,10 @@ impl SendPackageDma for Tx<$USARTX> {
             }
             let (_, c_back, tx_back) = unsafe { tx_back.write_all(c_back, &NDATA).wait() };
             
+            static mut MYDATA : MyData = MyData([0u8; PACKET_SZ*4]);
+            //let mut MYDATA2 : GenericArray<i32, P> = GenericArray::generate(|_| {0i32});
             unsafe { LE::write_i32_into(&v.vals, &mut MYDATA.0); }
             
-            // Значения для одной переменной
-            static mut MYDATA : MyData = MyData([0u8; PACKET_SZ*4]);
             let (_, c_back, tx_back) = unsafe { tx_back.write_all(c_back, &MYDATA).wait() };
             tx = Some(tx_back);
             c = Some(c_back);
@@ -87,10 +91,12 @@ impl SendPackageDma for Tx<$USARTX> {
         (c, tx)
     }
 }
-        )+
     }
 }
-
+/*
+use generic_array::GenericArray;
+use generic_array::sequence::GenericSequence;
+*/
 struct MyData([u8; PACKET_SZ*4]);
 impl core::convert::AsRef<[u8]> for MyData {
     #[inline]
@@ -99,14 +105,6 @@ impl core::convert::AsRef<[u8]> for MyData {
     }
 }
 
-impl_send_package_dma! {
-    USART1: (
-        tx: dma1::C4
-    ),
-    USART2: (
-        tx: dma1::C7
-    ),
-    USART3: (
-        tx: dma1::C2
-    ),
-}
+impl_send_package_dma!(USART1);
+impl_send_package_dma!(USART2);
+impl_send_package_dma!(USART3);
