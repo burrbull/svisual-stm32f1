@@ -9,7 +9,7 @@ use byteorder::{LE,ByteOrder};
 use stm32f103xx_hal as hal;
 use crate::hal::{
     stm32f103xx as device,
-    serial::{Tx, WriteDma},
+    serial::Tx,
     dma::DmaChannel
 };
 use crate::device::{USART1,USART2,USART3};
@@ -27,11 +27,10 @@ where
     P: generic_array::ArrayLength<i32>
 {
     fn send_package_dma(
-        self,
+        &mut self,
         module: &'static [u8],
-        c: Self::Dma,
-        values: &SV<N, P>)
-    -> (Self::Dma, Self);
+        c: &mut Self::Dma,
+        values: &SV<N, P>);
 }
 
 macro_rules! impl_send_package_dma {
@@ -42,16 +41,16 @@ where
     P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned
 {
     fn send_package_dma(
-        self,
+        &mut self,
         module: &'static [u8],
-        c: Self::Dma,
+        c: &mut Self::Dma,
         values: &SV<N, P>)
-    -> (Self::Dma, Self) {
+    {
         //if values.map.is_empty() {
         //    return Err(Error::EmptyPackage);
         //}
 
-        let (_, c, tx) = self.write_all(c, b"=begin=").wait();
+        self.write_all_and_wait(c, b"=begin=");
         
         let packet_size = P::to_usize();
         let vl_size : usize = NAME_SZ+4+packet_size*4;
@@ -62,33 +61,24 @@ where
             // Identifier (name) of the module
             copy_slice(&mut NDATA[4..], module);
         }
-        let (_, c, tx) = unsafe { tx.write_all(c, &NDATA).wait() };
+        unsafe { self.write_all_and_wait(c, &NDATA) };
 
-        let mut tx = Some(tx);
-        let mut c = Some(c);
         for (k, v) in values.map.iter() {
-            let c_back = c.take().unwrap();
-            let tx_back = tx.take().unwrap();
             // Data for single variable
             unsafe {
                 NDATA = [0u8; NAME_SZ+4];
                 copy_slice(&mut NDATA[0..NAME_SZ], k);
                 LE::write_i32(&mut NDATA[NAME_SZ..], v.vtype as i32);
             }
-            let (_, c_back, tx_back) = unsafe { tx_back.write_all(c_back, &NDATA).wait() };
+            unsafe { self.write_all_and_wait(c, &NDATA) };
             
             static mut MYDATA : MyData = MyData([0u8; PACKET_SZ*4]);
             //let mut MYDATA2 : GenericArray<i32, P> = GenericArray::generate(|_| {0i32});
             unsafe { LE::write_i32_into(&v.vals, &mut MYDATA.0); }
             
-            let (_, c_back, tx_back) = unsafe { tx_back.write_all(c_back, &MYDATA).wait() };
-            tx = Some(tx_back);
-            c = Some(c_back);
+            unsafe { self.write_all_and_wait(c, &MYDATA) };
         }
-        let tx = tx.unwrap();
-        let c = c.unwrap();
-        let (_, c, tx) = tx.write_all(c, b"=end=").wait();
-        (c, tx)
+        self.write_all_and_wait(c, b"=end=");
     }
 }
     }
@@ -108,3 +98,95 @@ impl core::convert::AsRef<[u8]> for MyData {
 impl_send_package_dma!(USART1);
 impl_send_package_dma!(USART2);
 impl_send_package_dma!(USART3);
+
+
+
+use core::sync::atomic::{self, Ordering};
+use crate::hal::dma::Static;
+use cast::u16;
+extern crate cast;
+
+
+pub trait WriteDmaWait<A, B>: hal::dma::DmaChannel
+where A: AsRef<[u8]>, B: Static<A> {
+    fn write_all_and_wait(&mut self, chan: &mut Self::Dma, buffer: B) -> B;
+}
+
+macro_rules! write_dma_wait {
+    ($(
+        $USARTX:ident: (
+            $tcifX:ident,
+            $cgifX:ident
+        ),
+    )+) => {
+        $(
+            impl<A, B> WriteDmaWait<A, B> for Tx<$USARTX> where A: AsRef<[u8]>, B: Static<A> {
+                fn write_all_and_wait(&mut self, chan: &mut Self::Dma, buffer: B
+                ) -> B
+                {
+                    {
+                        let buffer = buffer.borrow().as_ref();
+                        chan.cmar().write(|w| unsafe {
+                            w.ma().bits(buffer.as_ptr() as usize as u32)
+                        });
+                        chan.cndtr().write(|w| unsafe{
+                            w.ndt().bits(u16(buffer.len()).unwrap())
+                        });
+                        chan.cpar().write(|w| unsafe {
+                            w.pa().bits(&(*$USARTX::ptr()).dr as *const _ as usize as u32)
+                        });
+
+                        // TODO can we weaken this compiler barrier?
+                        // NOTE(compiler_fence) operations on `buffer` should not be reordered after
+                        // the next statement, which starts the DMA transfer
+                        atomic::compiler_fence(Ordering::SeqCst);
+
+                        chan.ccr().modify(|_, w| { w
+                            .mem2mem() .clear_bit()
+                            .pl()      .medium()
+                            .msize()   .bit8()
+                            .psize()   .bit8()
+                            .minc()    .set_bit()
+                            .pinc()    .clear_bit()
+                            .circ()    .clear_bit()
+                            .dir()     .set_bit()
+                            .en()      .set_bit()
+                        });
+                    }
+
+                    // XXX should we check for transfer errors here?
+                    // The manual says "A DMA transfer error can be generated by reading
+                    // from or writing to a reserved address space". I think it's impossible
+                    // to get to that state with our type safe API and *safe* Rust.
+                    while !chan.isr().$tcifX().bit_is_set() {}
+
+                    chan.ifcr().write(|w| w.$cgifX().set_bit());
+
+                    chan.ccr().modify(|_, w| w.en().clear_bit());
+
+                    // TODO can we weaken this compiler barrier?
+                    // NOTE(compiler_fence) operations on `buffer` should not be reordered
+                    // before the previous statement, which marks the DMA transfer as done
+                    atomic::compiler_fence(Ordering::SeqCst);
+
+                    buffer
+                }
+            }
+        )+
+    }
+}
+
+write_dma_wait! {
+    USART1: (
+        tcif4,
+        cgif4
+    ),
+    USART2: (
+        tcif7,
+        cgif7
+    ),
+    USART3: (
+        tcif2,
+        cgif2
+    ),
+}

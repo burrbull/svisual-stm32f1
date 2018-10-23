@@ -43,23 +43,16 @@ fn main() -> ! {
         clocks,
         &mut rcc.apb2,
     );
-    let tx = serial.split().0;
-    let c = channels.4;
+    let mut tx = serial.split().0;
+    let mut c = channels.4;
     
     let mut sv = svisual::SV::<U1>::new();
-    
-    let mut tx = Some(tx);
-    let mut c = Some(c);
     
     loop {
         for i in 0..30 {
             sv.add_float_value(b"temp", 15.+(i as f32)).ok();
             sv.next(|s| {
-                let c_back = c.take().unwrap();
-                let tx_back = tx.take().unwrap();
-                let (c_back, tx_back) = tx_back.send_package_dma(b"TempMod", c_back, s);
-                tx = Some(tx_back);
-                c = Some(c_back);
+                tx_back.send_package_dma(b"TempMod", &mut c, s);
             });
             delay.delay_ms(100u16);
         }
