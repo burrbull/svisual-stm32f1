@@ -15,3 +15,7 @@ git = "https://github.com/burrbull/svisual-rs"
 
 [dependencies.stm32f103xx-hal]
 git = "https://github.com/burrbull/stm32f103xx-hal"
+
+[dependencies.cast]
+default-features = false
+version = "0.2.2"
