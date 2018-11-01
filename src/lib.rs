@@ -72,11 +72,11 @@ where
             }
             unsafe { self.write_all_and_wait(c, &NDATA) };
             
-            static mut MYDATA : MyData = MyData([0u8; PACKET_SZ*4]);
+            static mut VALDATA : [u8; PACKET_SZ*4] = [0u8; PACKET_SZ*4];
             //let mut MYDATA2 : GenericArray<i32, P> = GenericArray::generate(|_| {0i32});
-            unsafe { LE::write_i32_into(&v.vals, &mut MYDATA.0); }
+            unsafe { LE::write_i32_into(&v.vals, &mut VALDATA); }
             
-            unsafe { self.write_all_and_wait(c, &MYDATA) };
+            unsafe { self.write_all_and_wait(c, &VALDATA) };
         }
         self.write_all_and_wait(c, b"=end=");
     }
@@ -87,28 +87,21 @@ where
 use generic_array::GenericArray;
 use generic_array::sequence::GenericSequence;
 */
-struct MyData([u8; PACKET_SZ*4]);
-impl core::convert::AsRef<[u8]> for MyData {
-    #[inline]
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
 
 impl_send_package_dma!(USART1);
 impl_send_package_dma!(USART2);
 impl_send_package_dma!(USART3);
 
-
+use stable_deref_trait::StableDeref;
+use as_slice::AsSlice;
 
 use core::sync::atomic::{self, Ordering};
-use crate::hal::dma::Static;
 use cast::u16;
 extern crate cast;
 
 
-pub trait WriteDmaWait<A, B>: hal::dma::DmaChannel
-where A: AsRef<[u8]>, B: Static<A> {
+pub trait WriteDmaWait<B>: hal::dma::DmaChannel
+where B: StableDeref + AsSlice<Element = u8> + 'static {
     fn write_all_and_wait(&mut self, chan: &mut Self::Dma, buffer: B) -> B;
 }
 
@@ -120,12 +113,12 @@ macro_rules! write_dma_wait {
         ),
     )+) => {
         $(
-            impl<A, B> WriteDmaWait<A, B> for Tx<$USARTX> where A: AsRef<[u8]>, B: Static<A> {
+            impl<B> WriteDmaWait<B> for Tx<$USARTX> where B: StableDeref + AsSlice<Element = u8> + 'static {
                 fn write_all_and_wait(&mut self, chan: &mut Self::Dma, buffer: B
                 ) -> B
                 {
                     {
-                        let buffer = buffer.borrow().as_ref();
+                        let buffer = buffer.as_slice();
                         chan.cmar().write(|w| unsafe {
                             w.ma().bits(buffer.as_ptr() as usize as u32)
                         });
