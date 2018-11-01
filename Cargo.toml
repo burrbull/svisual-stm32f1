@@ -9,6 +9,8 @@ heapless = "0.3.0"
 generic-array = "0.12"
 typenum = "1.10"
 byteorder = { version = "1", default-features = false }
+as-slice = "0.1"
+stable_deref_trait = "1.1"
 
 [dependencies.svisual]
 git = "https://github.com/burrbull/svisual-rs"
