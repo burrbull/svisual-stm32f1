@@ -5,7 +5,7 @@ authors = ["Andrey Zgarbul <zgarbul.andrey@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-heapless = "0.3.0"
+heapless = "0.4.0"
 generic-array = "0.12"
 typenum = "1.10"
 byteorder = { version = "1", default-features = false }
