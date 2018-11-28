@@ -3,8 +3,6 @@
 use svisual::{SV, NAME_SZ};
 pub mod prelude;
 
-const PACKET_SZ: usize = 10;
-
 use byteorder::{LE,ByteOrder};
 use stm32f103xx_hal as hal;
 use crate::hal::{
@@ -24,7 +22,8 @@ fn copy_slice(dst: &mut [u8], src: &[u8]) {
 pub trait SendPackageDma<N, P> : DmaChannel
 where
     N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
-    P: generic_array::ArrayLength<i32>
+    P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned + core::ops::Mul<U4>,
+    <P as core::ops::Mul<U4>>::Output : generic_array::ArrayLength<u8>
 {
     fn send_package_dma(
         &mut self,
@@ -33,12 +32,17 @@ where
         values: &SV<N, P>);
 }
 
+type GA<P> = GenericArray<u8, Prod<P, U4>>;
+use generic_array::typenum::{Prod, consts::U4};
+use generic_array::GenericArray;
+
 macro_rules! impl_send_package_dma {
     ($USARTX:ident) => {
 impl<N, P> SendPackageDma<N, P> for Tx<$USARTX>
 where
     N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
-    P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned
+    P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned + core::ops::Mul<U4>,
+    <P as core::ops::Mul<U4>>::Output : generic_array::ArrayLength<u8>
 {
     fn send_package_dma(
         &mut self,
@@ -55,6 +59,7 @@ where
         let packet_size = P::to_usize();
         let vl_size : usize = NAME_SZ+4+packet_size*4;
         static mut NDATA : [u8; NAME_SZ+4] = [0u8; NAME_SZ+4];
+        let mut val_data : GA<P> = GenericArray::default();// should be static
         unsafe {
             // Full package size
             LE::write_i32(&mut NDATA[0..4], (NAME_SZ + vl_size * values.map.len()) as i32);
@@ -72,27 +77,22 @@ where
             }
             unsafe { self.write_all_and_wait(c, &NDATA) };
             
-            static mut VALDATA : [u8; PACKET_SZ*4] = [0u8; PACKET_SZ*4];
-            //let mut VALDATA : GenericArray<u8, U40> = GenericArray::generate(|_| {0u8});
-            unsafe { LE::write_i32_into(&v.vals, VALDATA.as_mut_slice()); }
+            LE::write_i32_into(&v.vals, val_data.as_mut_slice());
             
-            unsafe { self.write_all_and_wait(c, &VALDATA) };
+            self.write_all_and_wait(c, &val_data);
         }
         self.write_all_and_wait(c, b"=end=");
     }
 }
     }
 }
-/*
-use generic_array::GenericArray;
-use generic_array::sequence::GenericSequence;
-*/
+
 impl_send_package_dma!(USART1);
 impl_send_package_dma!(USART2);
 impl_send_package_dma!(USART3);
 
 use stable_deref_trait::StableDeref;
-use as_slice::{AsSlice, AsMutSlice};
+use as_slice::AsSlice;
 
 use core::sync::atomic::{self, Ordering};
 use cast::u16;
@@ -100,7 +100,7 @@ extern crate cast;
 
 
 pub trait WriteDmaWait<B>: hal::dma::DmaChannel
-where B: StableDeref + AsSlice<Element = u8> + 'static {
+where B: StableDeref + AsSlice<Element = u8>/* + 'static*/ {
     fn write_all_and_wait(&mut self, chan: &mut Self::Dma, buffer: B) -> B;
 }
 
@@ -112,7 +112,7 @@ macro_rules! write_dma_wait {
         ),
     )+) => {
         $(
-            impl<B> WriteDmaWait<B> for Tx<$USARTX> where B: StableDeref + AsSlice<Element = u8> + 'static {
+            impl<B> WriteDmaWait<B> for Tx<$USARTX> where B: StableDeref + AsSlice<Element = u8>/* + 'static*/ {
                 fn write_all_and_wait(&mut self, chan: &mut Self::Dma, buffer: B
                 ) -> B
                 {
@@ -179,6 +179,4 @@ write_dma_wait! {
         cgif2
     ),
 }
-/*
-use generic_array::typenum::consts::U40;
-*/
+
