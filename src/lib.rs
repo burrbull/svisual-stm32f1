@@ -6,11 +6,10 @@ pub mod prelude;
 use byteorder::{LE,ByteOrder};
 use stm32f103xx_hal as hal;
 use crate::hal::{
-    stm32f103xx as device,
+    device::{USART1,USART2,USART3},
     serial::Tx,
     dma::DmaChannel
 };
-use crate::device::{USART1,USART2,USART3};
 
 fn copy_slice(dst: &mut [u8], src: &[u8]) {
     for (d, s) in dst.iter_mut().zip(src.iter()) {
