@@ -115,13 +115,13 @@ macro_rules! write_dma_wait {
                 fn write_all_and_wait(&mut self, chan: &mut Self::Dma, buffer: B
                 ) -> B
                 {
-                    chan.cmar().write(|w| unsafe {
+                    chan.mar().write(|w|
                         w.ma().bits(buffer.as_slice().as_ptr() as usize as u32)
-                    });
-                    chan.cndtr().write(|w| unsafe{
+                    );
+                    chan.ndtr().write(|w|
                         w.ndt().bits(u16(buffer.as_slice().len()).unwrap())
-                    });
-                    chan.cpar().write(|w| unsafe {
+                    );
+                    chan.par().write(|w| unsafe {
                         w.pa().bits(&(*$USARTX::ptr()).dr as *const _ as usize as u32)
                     });
 
@@ -130,7 +130,7 @@ macro_rules! write_dma_wait {
                     // the next statement, which starts the DMA transfer
                     atomic::compiler_fence(Ordering::SeqCst);
 
-                    chan.ccr().modify(|_, w| { w
+                    chan.cr().modify(|_, w| { w
                         .mem2mem() .clear_bit()
                         .pl()      .medium()
                         .msize()   .bit8()
@@ -150,7 +150,7 @@ macro_rules! write_dma_wait {
 
                     chan.ifcr().write(|w| w.$cgifX().set_bit());
 
-                    chan.ccr().modify(|_, w| w.en().clear_bit());
+                    chan.cr().modify(|_, w| w.en().clear_bit());
 
                     // TODO can we weaken this compiler barrier?
                     // NOTE(compiler_fence) operations on `buffer` should not be reordered
