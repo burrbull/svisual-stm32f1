@@ -15,8 +15,9 @@ stable_deref_trait = { version = "1.1", default-features = false }
 [dependencies.svisual]
 git = "https://github.com/burrbull/svisual-rs"
 
-[dependencies.stm32f103xx-hal]
-git = "https://github.com/burrbull/stm32f103xx-hal"
+[dependencies.stm32f1xx-hal]
+git = "https://github.com/burrbull/stm32f1xx-hal"
+features = ["stm32f103"]
 
 [dependencies.cast]
 default-features = false
