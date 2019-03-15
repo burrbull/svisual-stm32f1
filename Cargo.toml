@@ -17,7 +17,8 @@ git = "https://github.com/burrbull/svisual-rs"
 
 [dependencies.stm32f1xx-hal]
 git = "https://github.com/burrbull/stm32f1xx-hal"
-features = ["stm32f103"]
+branch = "gates"
+features = ["stm32f103c8"]
 
 [dependencies.cast]
 default-features = false
