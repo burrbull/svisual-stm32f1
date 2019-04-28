@@ -7,8 +7,8 @@ use byteorder::{LE,ByteOrder};
 use stm32f1xx_hal as hal;
 use crate::hal::{
     device::{USART1,USART2,USART3},
-    serial::Tx,
-    dma::DmaChannel
+    serial::{TxDma1, TxDma2, TxDma3},
+    dma::Transmit,
 };
 
 fn copy_slice(dst: &mut [u8], src: &[u8]) {
@@ -18,7 +18,7 @@ fn copy_slice(dst: &mut [u8], src: &[u8]) {
 }
 
 
-pub trait SendPackageDma<N, P> : DmaChannel
+pub trait SendPackageDma<N, P> : Transmit
 where
     N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
     P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned + core::ops::Mul<U4>,
@@ -27,7 +27,6 @@ where
     fn send_package_dma(
         &mut self,
         module: &'static [u8],
-        c: &mut Self::Dma,
         values: &SV<N, P>);
 }
 
@@ -36,8 +35,13 @@ use generic_array::typenum::{Prod, consts::U4};
 use generic_array::GenericArray;
 
 macro_rules! impl_send_package_dma {
-    ($USARTX:ident) => {
-impl<N, P> SendPackageDma<N, P> for Tx<$USARTX>
+    ($(
+        $USARTX:ident: (
+            $txdma:ident,
+        ),
+    )+) => {
+        $(
+impl<N, P> SendPackageDma<N, P> for $txdma
 where
     N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
     P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned + core::ops::Mul<U4>,
@@ -46,14 +50,13 @@ where
     fn send_package_dma(
         &mut self,
         module: &'static [u8],
-        c: &mut Self::Dma,
         values: &SV<N, P>)
     {
         //if values.map.is_empty() {
         //    return Err(Error::EmptyPackage);
         //}
 
-        self.write_all_and_wait(c, b"=begin=");
+        self.write_and_wait(b"=begin=");
         
         let packet_size = P::to_usize();
         let vl_size : usize = NAME_SZ+4+packet_size*4;
@@ -65,7 +68,7 @@ where
             // Identifier (name) of the module
             copy_slice(&mut NDATA[4..], module);
         }
-        unsafe { self.write_all_and_wait(c, &NDATA) };
+        unsafe { self.write_and_wait(&NDATA) };
 
         for (k, v) in values.map.iter() {
             // Data for single variable
@@ -74,88 +77,85 @@ where
                 copy_slice(&mut NDATA[0..NAME_SZ], k);
                 LE::write_i32(&mut NDATA[NAME_SZ..], v.vtype as i32);
             }
-            unsafe { self.write_all_and_wait(c, &NDATA) };
+            unsafe { self.write_and_wait(&NDATA) };
             
             LE::write_i32_into(&v.vals, val_data.as_mut_slice());
             
-            self.write_all_and_wait(c, &val_data);
+            self.write_and_wait(&val_data);
         }
-        self.write_all_and_wait(c, b"=end=");
+        self.write_and_wait(b"=end=");
     }
 }
+        )+
     }
 }
 
-impl_send_package_dma!(USART1);
-impl_send_package_dma!(USART2);
-impl_send_package_dma!(USART3);
+impl_send_package_dma! {
+    USART1: (
+        TxDma1,
+    ),
+    USART2: (
+        TxDma2,
+    ),
+    USART3: (
+        TxDma3,
+    ),
+}
+
 
 use stable_deref_trait::StableDeref;
 use as_slice::AsSlice;
 
 use core::sync::atomic::{self, Ordering};
-use cast::u16;
 extern crate cast;
 
 
-pub trait WriteDmaWait<B>: hal::dma::DmaChannel
+pub trait WriteDmaWait<B>: hal::dma::Transmit
 where B: StableDeref + AsSlice<Element = u8>/* + 'static*/ {
-    fn write_all_and_wait(&mut self, chan: &mut Self::Dma, buffer: B) -> B;
+    fn write_and_wait(&mut self, buffer: B) -> B;
 }
 
 macro_rules! write_dma_wait {
     ($(
         $USARTX:ident: (
-            $tcifX:ident,
-            $cgifX:ident
+            $txdma:ident,
         ),
     )+) => {
         $(
-            impl<B> WriteDmaWait<B> for Tx<$USARTX> where B: StableDeref + AsSlice<Element = u8>/* + 'static*/ {
-                fn write_all_and_wait(&mut self, chan: &mut Self::Dma, buffer: B
-                ) -> B
-                {
-                    chan.ch().mar.write(|w|
-                        w.ma().bits(buffer.as_slice().as_ptr() as usize as u32)
-                    );
-                    chan.ch().ndtr.write(|w|
-                        w.ndt().bits(u16(buffer.as_slice().len()).unwrap())
-                    );
-                    chan.ch().par.write(|w| unsafe {
-                        w.pa().bits(&(*$USARTX::ptr()).dr as *const _ as usize as u32)
-                    });
+            impl<B> WriteDmaWait<B> for $txdma
+            where
+                B: StableDeref + AsSlice<Element = u8>/* + 'static*/
+            {
+                fn write_and_wait(&mut self, buffer: B) -> B {
+                    self.channel.set_peripheral_address(unsafe{ &(*$USARTX::ptr()).dr as *const _ as u32 }, false);
 
-                    // TODO can we weaken this compiler barrier?
-                    // NOTE(compiler_fence) operations on `buffer` should not be reordered after
-                    // the next statement, which starts the DMA transfer
-                    atomic::compiler_fence(Ordering::SeqCst);
+                    self.channel.set_memory_address(buffer.as_slice().as_ptr() as u32, true);
+                    self.channel.set_transfer_length(buffer.as_slice().len());
 
-                    chan.ch().cr.modify(|_, w| { w
+                    atomic::compiler_fence(Ordering::Release);
+
+                    self.channel.ch().cr.modify(|_, w| { w
                         .mem2mem() .clear_bit()
                         .pl()      .medium()
                         .msize()   .bit8()
                         .psize()   .bit8()
-                        .minc()    .set_bit()
-                        .pinc()    .clear_bit()
                         .circ()    .clear_bit()
                         .dir()     .set_bit()
-                        .en()      .set_bit()
                     });
+                    self.start();
 
-                    // XXX should we check for transfer errors here?
-                    // The manual says "A DMA transfer error can be generated by reading
-                    // from or writing to a reserved address space". I think it's impossible
-                    // to get to that state with our type safe API and *safe* Rust.
-                    while !chan.isr().$tcifX().bit_is_set() {}
+                    while self.channel.in_progress() {}
 
-                    chan.ifcr().write(|w| w.$cgifX().set_bit());
+                    atomic::compiler_fence(Ordering::Acquire);
 
-                    chan.ch().cr.modify(|_, w| w.en().clear_bit());
+                    self.stop();
 
-                    // TODO can we weaken this compiler barrier?
-                    // NOTE(compiler_fence) operations on `buffer` should not be reordered
-                    // before the previous statement, which marks the DMA transfer as done
-                    atomic::compiler_fence(Ordering::SeqCst);
+                    // we need a read here to make the Acquire fence effective
+                    // we do *not* need this if `dma.stop` does a RMW operation
+                    unsafe { core::ptr::read_volatile(&0); }
+
+                    // we need a fence here for the same reason we need one in `Transfer.wait`
+                    atomic::compiler_fence(Ordering::Acquire);
 
                     buffer
                 }
@@ -166,16 +166,13 @@ macro_rules! write_dma_wait {
 
 write_dma_wait! {
     USART1: (
-        tcif4,
-        cgif4
+        TxDma1,
     ),
     USART2: (
-        tcif7,
-        cgif7
+        TxDma2,
     ),
     USART3: (
-        tcif2,
-        cgif2
+        TxDma3,
     ),
 }
 
