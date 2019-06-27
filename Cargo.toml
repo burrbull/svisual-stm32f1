@@ -5,15 +5,19 @@ authors = ["Andrey Zgarbul <zgarbul.andrey@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-heapless = "0.4.0"
 generic-array = "0.12"
 typenum = "1.10"
 byteorder = { version = "1", default-features = false }
 as-slice = "0.1"
 stable_deref_trait = { version = "1.1", default-features = false }
 
+[dependencies.heapless]
+git = "https://github.com/burrbull/heapless/"
+branch = "const-generics"
+
 [dependencies.svisual]
 git = "https://github.com/burrbull/svisual-rs"
+branch = "const"
 
 [dependencies.stm32f1xx-hal]
 git = "https://github.com/burrbull/stm32f1xx-hal"

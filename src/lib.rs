@@ -1,7 +1,9 @@
 #![no_std]
+#![feature(const_generics)]
 
 use core::mem::MaybeUninit;
 use svisual::{SV, NAME_SZ};
+use heapless::Vec;
 pub mod prelude;
 
 use byteorder::{LE,ByteOrder};
@@ -19,39 +21,25 @@ fn copy_slice(dst: &mut [u8], src: &[u8]) {
 }
 
 
-pub trait SendPackageDma<N, P> : Transmit
-where
-    N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
-    P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned + core::ops::Mul<U4>,
-    <P as core::ops::Mul<U4>>::Output : generic_array::ArrayLength<u8>
-{
+pub trait SendPackageDma<const N: usize, const P: usize> : Transmit {
     fn send_package_dma(
         &mut self,
         module: &'static [u8],
-        values: &SV<N, P>);
+        values: &SV<{N}, {P}>);
 }
-
-type GA<P> = GenericArray<u8, Prod<P, U4>>;
-use generic_array::typenum::{Prod, consts::U4};
-use generic_array::GenericArray;
 
 macro_rules! impl_send_package_dma {
     ($(
         $USARTX:ident: (
-            $txdma:ident,
+            $txdma:ident, $N:ident, $P:ident
         ),
     )+) => {
         $(
-impl<N, P> SendPackageDma<N, P> for $txdma
-where
-    N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
-    P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned + core::ops::Mul<U4>,
-    <P as core::ops::Mul<U4>>::Output : generic_array::ArrayLength<u8>
-{
+impl<const $N: usize, const $P: usize> SendPackageDma<{$N}, {$P}> for $txdma {
     fn send_package_dma(
         &mut self,
         module: &'static [u8],
-        values: &SV<N, P>)
+        values: &SV<{$N}, {$P}>)
     {
         //if values.map.is_empty() {
         //    return Err(Error::EmptyPackage);
@@ -59,10 +47,10 @@ where
 
         self.write_and_wait(b"=begin=");
         
-        let packet_size = P::to_usize();
-        let vl_size : usize = NAME_SZ+4+packet_size*4;
+        let vl_size : usize = NAME_SZ+4+$P*4;
         static mut NDATA : MaybeUninit<[u8; NAME_SZ+4]> = MaybeUninit::uninit();
-        let mut val_data : GA<P> = GenericArray::default();// should be static
+        let mut val_data : Vec<u8, {$P*4}> = Vec::new();// should be static
+        val_data.resize($P*4, 0).unwrap();
         unsafe {
             // Full package size
             let x_arr = &mut *NDATA.as_mut_ptr();
@@ -97,19 +85,19 @@ where
 
 impl_send_package_dma! {
     USART1: (
-        TxDma1,
+        TxDma1, N, P
     ),
     USART2: (
-        TxDma2,
+        TxDma2, N, P
     ),
     USART3: (
-        TxDma3,
+        TxDma3, N, P
     ),
 }
 
 
 use stable_deref_trait::StableDeref;
-use as_slice::AsSlice;
+use as_slice::{AsSlice, AsMutSlice};
 
 use core::sync::atomic::{self, Ordering};
 extern crate cast;
