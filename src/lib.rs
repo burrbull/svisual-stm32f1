@@ -62,7 +62,7 @@ where
         let packet_size = P::to_usize();
         let vl_size : usize = NAME_SZ+4+packet_size*4;
         static mut NDATA : MaybeUninit<[u8; NAME_SZ+4]> = MaybeUninit::uninit();
-        let mut val_data : GA<P> = GenericArray::default();// should be static
+        let mut val_data : MaybeUninit<GA<P>> = MaybeUninit::uninit();// should be static
         unsafe {
             // Full package size
             let x_arr = &mut *NDATA.as_mut_ptr();
@@ -84,9 +84,9 @@ where
             }
             unsafe { self.write_and_wait(&(*NDATA.as_ptr())) };
             
-            LE::write_i32_into(&v.vals, val_data.as_mut_slice());
+            unsafe { LE::write_i32_into(&v.vals, (&mut *val_data.as_mut_ptr()).as_mut_slice()); }
             
-            self.write_and_wait(&val_data);
+            unsafe { self.write_and_wait(&(*val_data.as_ptr())) };
         }
         self.write_and_wait(b"=end=");
     }
