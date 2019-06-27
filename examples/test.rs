@@ -5,15 +5,15 @@
 
 extern crate panic_halt;
 
-use stm32f103xx_hal as hal;
-use crate::hal::stm32f103xx as device;
 use crate::hal::delay::Delay;
 use crate::hal::prelude::*;
 use crate::hal::serial::Serial;
-use cortex_m_rt::{entry};
+use crate::hal::stm32f103xx as device;
+use cortex_m_rt::entry;
+use stm32f103xx_hal as hal;
 
+use heapless::consts::U1;
 use svisual_stm32f1::prelude::*;
-use heapless::consts::{U1};
 
 #[entry]
 fn main() -> ! {
@@ -29,9 +29,9 @@ fn main() -> ! {
     let channels = dp.DMA1.split(&mut rcc.ahb);
 
     let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
-    
+
     let mut delay = Delay::new(cp.SYST, clocks);
-    
+
     // USART1
     let pa9 = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
     let pa10 = gpioa.pa10;
@@ -45,12 +45,12 @@ fn main() -> ! {
     );
     let mut tx = serial.split().0;
     let mut c = channels.4;
-    
+
     let mut sv = svisual::SV::<U1>::new();
-    
+
     loop {
         for i in 0..30 {
-            sv.add_float_value(b"temp", 15.+(i as f32)).ok();
+            sv.add_float_value(b"temp", 15. + (i as f32)).ok();
             sv.next(|s| {
                 tx_back.send_package_dma(b"TempMod", &mut c, s);
             });

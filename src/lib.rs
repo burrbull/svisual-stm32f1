@@ -1,16 +1,16 @@
 #![no_std]
 
 use core::mem::MaybeUninit;
-use svisual::{SV, NAME_SZ};
+use svisual::{NAME_SZ, SV};
 pub mod prelude;
 
-use byteorder::{LE,ByteOrder};
-use stm32f1xx_hal as hal;
 use crate::hal::{
-    device::{USART1,USART2,USART3},
-    serial::{TxDma1, TxDma2, TxDma3},
+    device::{USART1, USART2, USART3},
     dma::Transmit,
+    serial::{TxDma1, TxDma2, TxDma3},
 };
+use byteorder::{ByteOrder, LE};
+use stm32f1xx_hal as hal;
 
 fn copy_slice(dst: &mut [u8], src: &[u8]) {
     for (d, s) in dst.iter_mut().zip(src.iter()) {
@@ -18,21 +18,17 @@ fn copy_slice(dst: &mut [u8], src: &[u8]) {
     }
 }
 
-
-pub trait SendPackageDma<N, P> : Transmit
+pub trait SendPackageDma<N, P>: Transmit
 where
     N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
     P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned + core::ops::Mul<U4>,
-    <P as core::ops::Mul<U4>>::Output : generic_array::ArrayLength<u8>
+    <P as core::ops::Mul<U4>>::Output: generic_array::ArrayLength<u8>,
 {
-    fn send_package_dma(
-        &mut self,
-        module: &'static [u8],
-        values: &SV<N, P>);
+    fn send_package_dma(&mut self, module: &'static [u8], values: &SV<N, P>);
 }
 
 type GA<P> = GenericArray<u8, Prod<P, U4>>;
-use generic_array::typenum::{Prod, consts::U4};
+use generic_array::typenum::{consts::U4, Prod};
 use generic_array::GenericArray;
 
 macro_rules! impl_send_package_dma {
@@ -58,35 +54,40 @@ where
         //}
 
         self.write_and_wait(b"=begin=");
-        
+
         let packet_size = P::to_usize();
         let vl_size : usize = NAME_SZ+4+packet_size*4;
         static mut NDATA : MaybeUninit<[u8; NAME_SZ+4]> = MaybeUninit::uninit();
-        let mut val_data : MaybeUninit<GA<P>> = MaybeUninit::uninit();// should be static
+        let mut val_data = MaybeUninit::<GA<P>>::uninit();// should be static
         unsafe {
             // Full package size
             let x_arr = &mut *NDATA.as_mut_ptr();
             LE::write_i32(&mut x_arr[0..4], (NAME_SZ + vl_size * values.map.len()) as i32);
             // Identifier (name) of the module
             copy_slice(&mut x_arr[4..], module);
+            if NAME_SZ > module.len() {
+                x_arr[module.len()+4] = 0;
+            }
+
+            self.write_and_wait(&(*NDATA.as_ptr()));
         }
-        unsafe { self.write_and_wait(&(*NDATA.as_ptr())) };
 
         for (k, v) in values.map.iter() {
-            // Data for single variable
             unsafe {
+                // Data for single variable
                 let x_arr = &mut *NDATA.as_mut_ptr();
                 copy_slice(&mut x_arr[0..NAME_SZ], k);
-                for x in &mut x_arr[k.len()..NAME_SZ] {
-                    *x = 0;
+                if NAME_SZ > k.len() {
+                    x_arr[k.len()] = 0;
                 }
                 LE::write_i32(&mut x_arr[NAME_SZ..], v.vtype as i32);
+
+                self.write_and_wait(&(*NDATA.as_ptr()));
+
+                LE::write_i32_into(&v.vals, (&mut *val_data.as_mut_ptr()).as_mut_slice());
+
+                self.write_and_wait(&(*val_data.as_ptr()));
             }
-            unsafe { self.write_and_wait(&(*NDATA.as_ptr())) };
-            
-            unsafe { LE::write_i32_into(&v.vals, (&mut *val_data.as_mut_ptr()).as_mut_slice()); }
-            
-            unsafe { self.write_and_wait(&(*val_data.as_ptr())) };
         }
         self.write_and_wait(b"=end=");
     }
@@ -107,16 +108,16 @@ impl_send_package_dma! {
     ),
 }
 
-
-use stable_deref_trait::StableDeref;
 use as_slice::AsSlice;
+use stable_deref_trait::StableDeref;
 
 use core::sync::atomic::{self, Ordering};
 extern crate cast;
 
-
 pub trait WriteDmaWait<B>: hal::dma::Transmit
-where B: StableDeref + AsSlice<Element = u8>/* + 'static*/ {
+where
+    B: StableDeref + AsSlice<Element = u8>,
+{
     fn write_and_wait(&mut self, buffer: B) -> B;
 }
 
@@ -180,4 +181,3 @@ write_dma_wait! {
         TxDma3,
     ),
 }
-
