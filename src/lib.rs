@@ -1,5 +1,6 @@
 #![no_std]
 
+use core::mem::MaybeUninit;
 use svisual::{SV, NAME_SZ};
 pub mod prelude;
 
@@ -60,24 +61,28 @@ where
         
         let packet_size = P::to_usize();
         let vl_size : usize = NAME_SZ+4+packet_size*4;
-        static mut NDATA : [u8; NAME_SZ+4] = [0u8; NAME_SZ+4];
+        static mut NDATA : MaybeUninit<[u8; NAME_SZ+4]> = MaybeUninit::uninit();
         let mut val_data : GA<P> = GenericArray::default();// should be static
         unsafe {
             // Full package size
-            LE::write_i32(&mut NDATA[0..4], (NAME_SZ + vl_size * values.map.len()) as i32);
+            let x_arr = &mut *NDATA.as_mut_ptr();
+            LE::write_i32(&mut x_arr[0..4], (NAME_SZ + vl_size * values.map.len()) as i32);
             // Identifier (name) of the module
-            copy_slice(&mut NDATA[4..], module);
+            copy_slice(&mut x_arr[4..], module);
         }
-        unsafe { self.write_and_wait(&NDATA) };
+        unsafe { self.write_and_wait(&(*NDATA.as_ptr())) };
 
         for (k, v) in values.map.iter() {
             // Data for single variable
             unsafe {
-                NDATA = [0u8; NAME_SZ+4];
-                copy_slice(&mut NDATA[0..NAME_SZ], k);
-                LE::write_i32(&mut NDATA[NAME_SZ..], v.vtype as i32);
+                let x_arr = &mut *NDATA.as_mut_ptr();
+                copy_slice(&mut x_arr[0..NAME_SZ], k);
+                for x in &mut x_arr[k.len()..NAME_SZ] {
+                    *x = 0;
+                }
+                LE::write_i32(&mut x_arr[NAME_SZ..], v.vtype as i32);
             }
-            unsafe { self.write_and_wait(&NDATA) };
+            unsafe { self.write_and_wait(&(*NDATA.as_ptr())) };
             
             LE::write_i32_into(&v.vals, val_data.as_mut_slice());
             
