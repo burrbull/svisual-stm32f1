@@ -111,6 +111,7 @@ impl_send_package_dma! {
 
 use as_slice::AsSlice;
 use stable_deref_trait::StableDeref;
+use stm32f1xx_hal::dma::TransferPayload;
 
 use core::sync::atomic::{self, Ordering};
 extern crate cast;
@@ -144,8 +145,8 @@ macro_rules! write_dma_wait {
                     self.channel.ch().cr.modify(|_, w| { w
                         .mem2mem() .clear_bit()
                         .pl()      .medium()
-                        .msize()   .bit8()
-                        .psize()   .bit8()
+                        .msize()   .bits8()
+                        .psize()   .bits8()
                         .circ()    .clear_bit()
                         .dir()     .set_bit()
                     });
