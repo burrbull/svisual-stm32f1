@@ -5,24 +5,20 @@ authors = ["Andrey Zgarbul <zgarbul.andrey@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-heapless = "0.5.0"
+heapless = "0.5"
 generic-array = "0.13"
 typenum = "1.10"
-as-slice = {git = "https://github.com/burrbull/as-slice", branch="patch-1"}
+as-slice = "0.2"
 svisual = "0.2.4"
 
 [dependencies.byteorder]
 default-features = false
 version = "1.0"
 
-[dependencies.stable_deref_trait]
-default-features = false
-version = "1.1"
-
 [dependencies.cast]
 default-features = false
 version = "0.2.2"
 
 [dependencies.stm32f1xx-hal]
-git = "https://github.com/stm32-rs/stm32f1xx-hal"
+git = "https://github.com/burrbull/stm32f1xx-hal"
 features = ["stm32f103"]

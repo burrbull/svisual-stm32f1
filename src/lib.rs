@@ -110,17 +110,16 @@ impl_send_package_dma! {
 }
 
 use as_slice::AsSlice;
-use stable_deref_trait::StableDeref;
 use stm32f1xx_hal::dma::TransferPayload;
 
 use core::sync::atomic::{self, Ordering};
 extern crate cast;
 
-pub trait WriteDmaWait<B>: hal::dma::Transmit
+pub trait BlockingWriteDma<B>: hal::dma::Transmit
 where
-    B: StableDeref + AsSlice<Element = u8>,
+    B: AsSlice<Element = u8>,
 {
-    fn write_and_wait(&mut self, buffer: B) -> B;
+    fn write_and_wait(&mut self, buffer: &B);
 }
 
 macro_rules! write_dma_wait {
@@ -130,11 +129,11 @@ macro_rules! write_dma_wait {
         ),
     )+) => {
         $(
-            impl<B> WriteDmaWait<B> for $txdma
+            impl<B> BlockingWriteDma<B> for $txdma
             where
-                B: StableDeref + AsSlice<Element = u8>/* + 'static*/
+                B: AsSlice<Element = u8>
             {
-                fn write_and_wait(&mut self, buffer: B) -> B {
+                fn write_and_wait(&mut self, buffer: &B) {
                     self.channel.set_peripheral_address(unsafe{ &(*$USARTX::ptr()).dr as *const _ as u32 }, false);
 
                     self.channel.set_memory_address(buffer.as_slice().as_ptr() as u32, true);
@@ -164,8 +163,6 @@ macro_rules! write_dma_wait {
 
                     // we need a fence here for the same reason we need one in `Transfer.wait`
                     atomic::compiler_fence(Ordering::Acquire);
-
-                    buffer
                 }
             }
         )+
