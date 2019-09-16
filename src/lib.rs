@@ -12,12 +12,6 @@ use crate::hal::{
 use byteorder::{ByteOrder, LE};
 use stm32f1xx_hal as hal;
 
-fn copy_slice(dst: &mut [u8], src: &[u8]) {
-    for (d, s) in dst.iter_mut().zip(src.iter()) {
-        *d = *s;
-    }
-}
-
 pub trait SendPackageDma<N, P>: Transmit
 where
     N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
@@ -62,11 +56,12 @@ where
         unsafe {
             // Full package size
             let x_arr = &mut *NDATA.as_mut_ptr();
-            LE::write_i32(&mut x_arr[0..4], (NAME_SZ + vl_size * values.map.len()) as i32);
+            x_arr[0..4].copy_from_slice(&((NAME_SZ + vl_size * values.map.len()) as u32).to_le_bytes());
             // Identifier (name) of the module
-            copy_slice(&mut x_arr[4..], module);
-            if NAME_SZ > module.len() {
-                x_arr[module.len()+4] = 0;
+            let len = module.len();
+            x_arr[4..len+4].copy_from_slice(module);
+            if NAME_SZ > len {
+                x_arr[len+4] = 0;
             }
 
             self.write_and_wait(&(*NDATA.as_ptr()));
@@ -76,15 +71,13 @@ where
             unsafe {
                 // Data for single variable
                 let x_arr = &mut *NDATA.as_mut_ptr();
-                copy_slice(&mut x_arr[0..NAME_SZ], k);
+                x_arr[0..k.len()].copy_from_slice(k);
                 if NAME_SZ > k.len() {
                     x_arr[k.len()] = 0;
                 }
-                LE::write_i32(&mut x_arr[NAME_SZ..], v.vtype as i32);
+                x_arr[NAME_SZ..].copy_from_slice(&(v.vtype as i32).to_le_bytes());
 
                 self.write_and_wait(&(*NDATA.as_ptr()));
-
-
             }
 
             LE::write_i32_into(&v.vals, &mut val_data.as_mut_slice());
