@@ -6,19 +6,21 @@ pub mod prelude;
 
 use crate::hal::{
     device::{USART1, USART2, USART3},
-    dma::Transmit,
+    serial::{Tx1, Tx2, Tx3},
     serial::{TxDma1, TxDma2, TxDma3},
 };
 use byteorder::{ByteOrder, LE};
 use stm32f1xx_hal as hal;
+use nb::block;
+use embedded_hal::serial::Write;
 
-pub trait SendPackageDma<N, P>: Transmit
+pub trait SendPackage<N, P>
 where
     N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
     P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned + core::ops::Mul<U4>,
     <P as core::ops::Mul<U4>>::Output: generic_array::ArrayLength<u8>,
 {
-    fn send_package_dma(&mut self, module: &'static [u8], values: &SV<N, P>);
+    fn send_package(&mut self, module: &'static [u8], values: &SV<N, P>);
 }
 
 type GA<P> = GenericArray<u8, Prod<P, U4>>;
@@ -28,17 +30,18 @@ use generic_array::GenericArray;
 macro_rules! impl_send_package_dma {
     ($(
         $USARTX:ident: (
+            $tx:ident,
             $txdma:ident,
         ),
     )+) => {
         $(
-impl<N, P> SendPackageDma<N, P> for $txdma
+impl<N, P> SendPackage<N, P> for $txdma
 where
     N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
     P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned + core::ops::Mul<U4>,
     <P as core::ops::Mul<U4>>::Output : generic_array::ArrayLength<u8>
 {
-    fn send_package_dma(
+    fn send_package(
         &mut self,
         module: &'static [u8],
         values: &SV<N, P>)
@@ -86,18 +89,85 @@ where
         self.write_and_wait(b"=end=");
     }
 }
+impl<N, P> SendPackage<N, P> for $tx
+where
+    N: heapless::ArrayLength<(&'static [u8], svisual::ValueRec<P>)>,
+    P: generic_array::ArrayLength<i32> + typenum::marker_traits::Unsigned + core::ops::Mul<U4>,
+    <P as core::ops::Mul<U4>>::Output : generic_array::ArrayLength<u8>
+{
+    fn send_package(
+        &mut self,
+        module: &'static [u8],
+        values: &SV<N, P>)
+    {
+        //if values.map.is_empty() {
+        //    return Err(Error::EmptyPackage);
+        //}
+
+        for byte in b"=begin=" {
+            block!(self.write(*byte)).ok();
+        }
+
+        let packet_size = P::to_usize();
+        let vl_size : usize = NAME_SZ+4+packet_size*4;
+        static mut NDATA : MaybeUninit<[u8; NAME_SZ+4]> = MaybeUninit::uninit();
+        let mut val_data = unsafe { MaybeUninit::<GA<P>>::uninit().assume_init() };// should be static
+        unsafe {
+            // Full package size
+            let x_arr = &mut *NDATA.as_mut_ptr();
+            x_arr[0..4].copy_from_slice(&((NAME_SZ + vl_size * values.map.len()) as u32).to_le_bytes());
+            // Identifier (name) of the module
+            let len = module.len();
+            x_arr[4..len+4].copy_from_slice(module);
+            if NAME_SZ > len {
+                x_arr[len+4] = 0;
+            }
+
+            for byte in &(*NDATA.as_ptr()) {
+                block!(self.write(*byte)).ok();
+            }
+        }
+
+        for (k, v) in values.map.iter() {
+            unsafe {
+                // Data for single variable
+                let x_arr = &mut *NDATA.as_mut_ptr();
+                x_arr[0..k.len()].copy_from_slice(k);
+                if NAME_SZ > k.len() {
+                    x_arr[k.len()] = 0;
+                }
+                x_arr[NAME_SZ..].copy_from_slice(&(v.vtype as i32).to_le_bytes());
+
+            for byte in &(*NDATA.as_ptr()) {
+                block!(self.write(*byte)).ok();
+            }
+            }
+
+            LE::write_i32_into(&v.vals, &mut val_data.as_mut_slice());
+            for byte in &val_data {
+                block!(self.write(*byte)).ok();
+            }
+        }
+        for byte in b"=end=" {
+            block!(self.write(*byte)).ok();
+        }
+    }
+}
         )+
     }
 }
 
 impl_send_package_dma! {
     USART1: (
+        Tx1,
         TxDma1,
     ),
     USART2: (
+        Tx2,
         TxDma2,
     ),
     USART3: (
+        Tx3,
         TxDma3,
     ),
 }
